@@ -4,6 +4,8 @@ A workout log for two. It remembers what you lifted last time, tells you when to
 
 - **Last time, on every set.** Each set shows last session's weight and reps, and the weight is filled in for you. Change it on one set and the sets after it follow, or nudge it with − and +. Tick a set when it's done.
 - **Cardio with level or incline.** Log minutes plus the treadmill incline or machine level, filled in from last time.
+- **Form tips.** Tap **Form tips** on an exercise to see what it is and the PT's cues for it.
+- **Starting weights.** Paste a starting-weights code in **More**, or set them one by one in **Plan > Edit**. They're used until you first log the exercise, and stay on your phone and in your shared sheet, not in this repo.
 - **Rest timer.** Ticking a set starts the rest timer for that exercise, with a beep and buzz when it's time. Supersets rest only after both exercises.
 - **When to go heavier.** Once you hit the top of the rep range on every set, the exercise shows a suggested next weight. For assisted pull-ups it suggests less assistance.
 - **Progress.** Every exercise gets a chart (heaviest weight, estimated 1-rep max or volume), and finished workouts count new bests. Weeks on target track your weekly goal.

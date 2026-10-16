@@ -1,5 +1,5 @@
 /* Reps service worker: makes the app open offline. The sync script on Google is never cached. */
-const APP_CACHE = 'reps-app-1.1.0';
+const APP_CACHE = 'reps-app-1.2.0';
 const FONT_CACHE = 'reps-fonts-1';
 const APP_FILES = ['./', './index.html', './app.js', './sync.gs', './manifest.webmanifest',
   './icons/kettlebells-180.png', './icons/kettlebells-192.png', './icons/kettlebells-512.png'];

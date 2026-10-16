@@ -3,7 +3,7 @@
    training partners on different phones can see each other's workouts and progress. */
 'use strict';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const LS_KEY = 'reps:v1';
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -15,6 +15,7 @@ const DAY = 86400000;
 // type: w = weight × reps, a = assisted (assistance kg × reps, less is harder), bw = reps only, t = hold in seconds, c = cardio minutes
 const EX = [
   ['goblet-squat', 'Goblet squat', 'w', 'Legs', 'Dumbbell', 2],
+  ['med-ball-squat', 'Squat with ball throw', 'w', 'Legs', 'Medicine ball', 1],
   ['hexbar-dl', 'Hex bar deadlift', 'w', 'Legs', 'Barbell', 5],
   ['leg-press', 'Leg press (horizontal)', 'w', 'Legs', 'Machine', 5],
   ['leg-press-v', 'Leg press (vertical)', 'w', 'Legs', 'Machine', 5],
@@ -29,6 +30,7 @@ const EX = [
   ['bb-bench', 'Barbell bench press', 'w', 'Chest', 'Barbell', 2.5],
   ['incline-db', 'Incline dumbbell press', 'w', 'Chest', 'Dumbbell', 2, { each: 1 }],
   ['chest-press', 'Chest press (machine)', 'w', 'Chest', 'Machine', 2.5],
+  ['pec-deck', 'Chest fly (butterfly machine)', 'w', 'Chest', 'Machine', 2.5],
   ['push-up', 'Push-up', 'bw', 'Chest', 'Bodyweight', 1],
   ['cable-row', 'Seated cable row', 'w', 'Back', 'Cable', 2.5],
   ['low-row', 'Low row', 'w', 'Back', 'Machine', 2.5],
@@ -51,6 +53,33 @@ const EX = [
   ['elliptical', 'Elliptical', 'c', 'Cardio', 'Machine', 1],
 ].map(([id, name, type, m, eq, inc, f]) => Object.assign({ id, name, type, m, eq, inc }, f || {}));
 const EX_BY = Object.fromEntries(EX.map(e => [e.id, e]));
+// What each exercise is, and the form cues from the PT sessions.
+const TIPS = {
+  'goblet-squat': { d: 'Hold one dumbbell upright against your chest and squat.', cues: ["Sit back as if you're sitting down on a chair."] },
+  'med-ball-squat': { d: 'Squat holding the ball at your chest, then stand up quickly and throw it up. Catch it and go straight into the next rep.' },
+  'hexbar-dl': { d: 'Stand inside the hex bar, hold the handles at your sides and stand up with it.', cues: ['Go down as if sitting in a chair, back straight.', 'Feet pointing forward.', 'Breathe in and brace your core before you lift.'] },
+  'leg-press': { d: 'Push the platform away with your feet, then let it come back under control.', cues: ['Knees slightly outward, in line with your toes.', "Don't lock your knees at the top."] },
+  'leg-press-v': { d: 'Push the platform up with your feet, then let it come back down under control.', cues: ['Feet on the second-highest spot on the platform.', 'Knees slightly outward, in line with your toes.', "Don't lock your knees at the top."] },
+  'leg-curl': { d: 'Curl the pad in with your heels to work the back of your thighs.', cues: ["Line your knees up with the machine's pivot point.", 'Curl all the way in.', 'Let it back up slowly.'] },
+  'db-bench': { d: 'Lie on a flat bench and press two dumbbells up over your chest.', cues: ['Elbows at about 45° from your body, not flared out.', 'Hold the dumbbells horizontal, like gripping motorbike handlebars.', 'Lower them slowly.'] },
+  'bb-bench': { d: 'Lie on the bench, lower the bar to your chest and press it back up.', cues: ['Line your chin up with the bar.', 'Brace your abs.', 'Breathe in before lowering, breathe out after pressing up.', 'Lower the bar to your lower ribs.', "Touch your chest but don't rest the bar there. Stay in control all the way."] },
+  'pec-deck': { d: 'Also called the butterfly (kupu-kupu). Bring the arms together in front of your chest.', cues: ['Lean slightly forward.', "Keep a slight bend in your elbows. Don't lock them.", "Your arms don't need to go too high."] },
+  'cable-row': { d: 'Sit facing the low cable and pull the handle to your stomach.', cues: ['Shuffle back until your legs are straight.', 'Back straight, shoulders down and back.', 'Pull with your body and arms together while squeezing your shoulder blades.'] },
+  'low-row': { d: 'Machine row: pull the handles back toward your stomach.', cues: ["Reach forward until you can't reach any further. Get the stretch, no need to hunch.", 'Pull back until your shoulder blades squeeze together.'] },
+  'assisted-pullup': { d: 'Kneel on the pad. The machine takes some of your weight while you pull up. More assistance is easier.', cues: ['Open your shoulders and bring your chest toward the bar.', 'Pull all the way up.', 'Elbows facing forward.'] },
+  'face-pull': { d: 'Pull a rope on a high cable toward your face.', cues: ['Finish like flexing your biceps: elbows high, hands beside your head.', 'Not like holding bike handlebars out in front.'] },
+  'lateral-raise': { d: 'Raise the dumbbells out to the sides, up to shoulder height.' },
+  'biceps-curl': { d: 'Curl the dumbbells up to your shoulders. The weight is per dumbbell.', cues: ['Start with the dumbbells in front of your thighs.'] },
+  'triceps-pushdown': { d: 'Push the rope down on a high cable by straightening your elbows.', cues: ['Push toward the floor, in front of you, not out to the sides.', 'Keep your elbows still.', 'Let it come up slowly.'] },
+  'plank': { d: 'Hold a straight line from head to heels on your forearms.' },
+  'side-plank': { d: 'Hold your body straight on one forearm, then switch sides.' },
+  'incline-walk': { d: 'Walk on the treadmill with the incline up. Log the minutes and the incline.' },
+};
+function tipsHtml(id) {
+  const t = TIPS[id]; if (!t) return '';
+  return `<div class="tips">${t.d ? `<p>${esc(t.d)}</p>` : ''}${t.cues ? `<ul>${t.cues.map(c => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}</div>`;
+}
+const startOf = (pid, ex) => { const p = D.records[pid]; return p && p.starts && p.starts[ex] != null ? p.starts[ex] : null; };
 const GROUPS = ['Legs', 'Chest', 'Back', 'Shoulders', 'Arms', 'Core', 'Cardio', 'Other'];
 const TYPE_NAMES = { w: 'Weight and reps', a: 'Assisted (machine helps)', bw: 'Reps only', t: 'Hold for time', c: 'Cardio minutes' };
 
@@ -103,6 +132,7 @@ const I = {
   chart: svg('<path d="M4 19h16M5 15l4-4 4 3 6-7"/>'),
   edit: svg('<path d="M4 20h4L19 9l-4-4L4 16v4z"/>'),
   play: svg('<path d="M7 5l12 7-12 7V5z"/>'),
+  info: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>'),
 };
 
 /* ---------- storage ---------- */
@@ -371,7 +401,7 @@ function makeItem(pid, t, before) {
   for (let i = 0; i < (t.n || 1); i++) {
     const p = ps[i] || ps[ps.length - 1];
     const ex = exById(t.ex);
-    const w = hasStep(ex.type) && p && p.w != null ? p.w : null;
+    const w = !hasStep(ex.type) ? null : p ? (p.w != null ? p.w : null) : startOf(pid, t.ex);
     sets.push({ w, r: null, t: null, m: null, l: ex.type === 'c' && p && p.l != null ? p.l : null, done: false, auto: w != null });
   }
   return { k: uid(), ex: t.ex, n: t.n, lo: t.lo, hi: t.hi, rest: t.rest, g: t.g || null, sets };
@@ -415,7 +445,8 @@ function exCard(it) {
   const head = f.map(x => `<span class="lab" style="text-align:center">${x === 'w' ? (ex.type === 'a' ? 'assist kg' : ex.each ? 'kg each' : 'kg') : x === 'l' ? lvlName(ex) : FIELD_LABEL[x]}</span>`).join('');
   const cls = hasStep(ex.type) ? 'cw' : 'c' + f.length;
   return `<section class="ex" id="ex-${it.k}">
-    <div class="ex-top"><div><h3>${esc(ex.name)}</h3><p class="tgt">${esc(targetText(it, ex))}</p></div><button class="icon-btn" data-act="ex-menu" data-k="${it.k}" aria-label="Options for ${esc(ex.name)}">${I.dots}</button></div>
+    <div class="ex-top"><div><h3>${esc(ex.name)}</h3><p class="tgt">${esc(targetText(it, ex))}</p>${TIPS[ex.id] ? `<button class="tips-btn" data-act="tips" data-k="${it.k}" aria-expanded="${!!(S.tips && S.tips[it.k])}">${I.info} ${S.tips && S.tips[it.k] ? 'Hide tips' : 'Form tips'}</button>` : ''}</div><button class="icon-btn" data-act="ex-menu" data-k="${it.k}" aria-label="Options for ${esc(ex.name)}">${I.dots}</button></div>
+    ${S.tips && S.tips[it.k] ? tipsHtml(ex.id) : ''}
     ${hintFor(it, ex, prev)}
     <div class="sets"><div class="set-head ${cls}"><span class="lab" style="text-align:center">set</span><span class="lab">last</span>${head}<span></span></div>
     ${it.sets.map((s, i) => setRow(it, ex, s, i, ps[i])).join('')}</div>
@@ -442,6 +473,8 @@ function setRow(it, ex, s, i, p) {
 }
 function hintFor(it, ex, prev) {
   if (!prev) {
+    const st = startOf(D.active ? D.active.person : D.me, it.ex);
+    if (st != null && hasStep(ex.type)) return `<div class="hint first"><p>Starting ${ex.type === 'a' ? 'assistance' : 'weight'}: ${fmtN(st)} kg. Adjust with − and + if it feels too easy or too hard.</p></div>`;
     if (ex.type === 'w') return `<div class="hint first"><p>First time: pick a weight you can lift ${rng(it.lo, it.hi)} times with 1–3 reps to spare.</p></div>`;
     if (ex.type === 'a') return `<div class="hint first"><p>First time: pick enough assistance to do ${rng(it.lo, it.hi)} clean reps. Less assistance is harder.</p></div>`;
     return '';
@@ -750,6 +783,7 @@ function exSheet(exId, pid, metric) {
   const ss = sessionsFor(pid, exId).reverse();
   const html = `<div class="sheet-head"><div><span class="lab">${esc(ex.m || '')}</span><h2>${esc(ex.name)}</h2></div>${closeBtn()}</div>
     <div class="stack">
+      ${tipsHtml(exId)}
       ${ms.length > 1 ? `<div class="seg">${ms.map(x => `<button data-act="ex-metric" data-ex="${esc(exId)}" data-p="${pid}" data-m="${x[0]}" aria-pressed="${x[0] === m[0]}">${x[0] === 'level' ? (ex.lvl === 'incline' ? 'Incline' : 'Level') : x[1]}</button>`).join('')}</div>` : `<p class="small muted">${m[1]}</p>`}
       ${m[0] === 'e1rm' ? '<p class="small muted">An estimate of the most you could lift once, worked out from your weight and reps. It goes up when either one does.</p>' : ''}
       <div class="card flat">${series.length ? chart(series, m[2], 'ex') : '<p class="muted">No sessions yet.</p>'}</div>
@@ -823,6 +857,7 @@ function routineSheet(rid) {
         <label><span class="lab">Max ${unit}</span><input type="number" inputmode="numeric" min="1" data-rf="hi" data-r="${rid}" data-i="${i}" value="${it.hi}"></label>
         <label><span class="lab">Rest</span><select data-rf="rest" data-r="${rid}" data-i="${i}">${RESTS.concat(RESTS.includes(it.rest) ? [] : [it.rest]).map(s => `<option value="${s}"${s === it.rest ? ' selected' : ''}>${s ? mmss(s) : 'None'}</option>`).join('')}</select></label>
       </div>
+      ${hasStep(ex.type) ? `<label class="start-row"><span class="small muted">Starting ${ex.type === 'a' ? 'assistance' : 'weight'}</span><span class="start-in"><input type="text" inputmode="decimal" data-sf="${esc(it.ex)}" value="${fmtN(startOf(D.me, it.ex))}" placeholder="—" aria-label="Starting weight for ${esc(ex.name)}"><span class="small muted">kg</span></span></label>` : ''}
       ${i < r.items.length - 1 ? `<button class="link-btn" data-act="ri-link" data-r="${rid}" data-i="${i}" aria-pressed="${linked}">${I.link} ${linked ? 'Superset with the next one' : 'Make a superset with the next one'}</button>` : ''}</div>`;
   }).join('');
   openSheet({ kind: 'routine', rid, html: `<div class="sheet-head"><input type="text" data-rf="name" data-r="${rid}" value="${esc(r.name)}" aria-label="Workout name" style="font-family:var(--display);font-weight:650;font-size:19px">${closeBtn()}</div>
@@ -925,6 +960,11 @@ function renderMore() {
       <input type="text" id="join-code" placeholder="reps:…" autocomplete="off" autocapitalize="off" spellcheck="false">
       <button class="btn" data-act="join">Join</button></div>`;
   }
+  const nStart = Object.keys((p.starts) || {}).length;
+  h += `<div class="sec-head"><h2>Starting weights</h2>${nStart ? `<span class="pill">${nStart} set</span>` : ''}</div><div class="card flat stack">
+    <p class="small muted">Used for an exercise until you first log it. Paste a starting-weights code, or set them one by one in Plan › Edit.</p>
+    <input type="text" id="start-code" placeholder="reps-start:…" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button class="btn" data-act="start-apply">Add starting weights</button></div>`;
   h += `<div class="sec-head"><h2>Training</h2></div><div class="card flat">
     <div class="toggle-row"><span><b>Weekly goal</b><span class="small muted" style="display:block">Workouts per week</span></span><span class="stepper"><button class="btn small" data-act="goal" data-v="-1" aria-label="Fewer">${I.minus}</button><b class="num">${D.settings.goal || 2}</b><button class="btn small" data-act="goal" data-v="1" aria-label="More">${I.plus}</button></span></div>
     <div class="toggle-row"><span><b>Rest timer sound</b><span class="small muted" style="display:block">Beeps when rest is over. Phones on silent stay quiet.</span></span><button class="switch" role="switch" data-act="sound" aria-checked="${!!D.settings.sound}" aria-label="Rest timer sound"></button></div></div>`;
@@ -1115,6 +1155,16 @@ const ACT = {
   tick: el => tick(el),
   apply: el => { const it = itemOf(el.dataset.k); if (!it) return; it.sets.forEach(s => { if (!s.done) { s.w = Number(el.dataset.v); s.auto = true; } }); save(); redrawCard(it.k); },
   step: el => stepWeight(el),
+  tips: el => { S.tips = S.tips || {}; S.tips[el.dataset.k] = !S.tips[el.dataset.k]; redrawCard(el.dataset.k); },
+  'start-apply': () => {
+    const raw = String((($('#start-code') || {}).value) || '').trim().replace(/^reps-start:/i, '').replace(/\s+/g, '');
+    let w = null;
+    try { const o = JSON.parse(atob(raw)); if (o && typeof o.w === 'object') w = o.w; } catch (e) { /* bad code */ }
+    const good = w ? Object.entries(w).filter(([k, v]) => EX_BY[k] && typeof v === 'number' && v >= 0 && v < 1000) : [];
+    if (!good.length) { toast("That code doesn't look right. Copy the whole thing, starting with reps-start:", 4000); return; }
+    const p = me(); p.starts = Object.assign({}, p.starts || {}, Object.fromEntries(good)); put(p);
+    render(); toast(`Added starting weights for ${good.length} exercises.`);
+  },
   'set-add': el => { const it = itemOf(el.dataset.k); const l = it.sets[it.sets.length - 1] || {}; it.sets.push({ w: l.w == null ? null : l.w, r: null, t: null, m: null, l: l.l == null ? null : l.l, done: false, auto: l.w != null }); save(); redrawCard(it.k); },
   'set-remove': el => { const it = itemOf(el.dataset.k); if (it.sets.length > 1) it.sets.pop(); save(); redrawCard(it.k); },
   'ex-menu': el => {
@@ -1201,6 +1251,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.rf) routineField(t);
+  else if (t.dataset.sf && me()) { const p = me(), v = parseNum(t.value); p.starts = Object.assign({}, p.starts || {}); if (v == null) delete p.starts[t.dataset.sf]; else p.starts[t.dataset.sf] = v; put(p); }
   else if (t.id === 'my-name') { const v = t.value.trim(); if (v && me()) { me().name = v.slice(0, 30); put(me()); toast('Name saved.'); } }
   else if (t.id === 'restore' && t.files && t.files[0]) restore(t.files[0]);
 });
