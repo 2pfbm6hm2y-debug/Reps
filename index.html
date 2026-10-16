@@ -162,6 +162,16 @@ p{margin:0}
 .sets{margin-top:8px}
 .set-row,.set-head{display:grid;grid-template-columns:26px minmax(0,1fr) 74px 62px 44px;gap:8px;align-items:center}
 .set-row.c1,.set-head.c1{grid-template-columns:26px minmax(0,1fr) 92px 44px}
+.set-row.cw,.set-head.cw{grid-template-columns:20px minmax(0,1fr) 128px 52px 44px;gap:6px}
+.wcell{display:grid;grid-template-columns:30px minmax(0,1fr) 30px;align-items:center;border:1px solid var(--line);border-radius:10px;background:var(--paper);min-height:42px;overflow:hidden}
+.wcell .in{border:0;border-radius:0;background:transparent;min-height:40px;padding:0}
+.step{height:40px;display:grid;place-items:center;color:var(--accent)}
+.step svg{width:16px;height:16px}
+.step:active{background:var(--sunk)}
+.wcell:has(.in.flag){border-color:var(--bad);box-shadow:0 0 0 2px var(--bad-soft)}
+.wcell .in.flag{box-shadow:none}
+.set-row.done .wcell{background:transparent;border-color:transparent}
+.set-row.done .step{visibility:hidden}
 .set-head{padding:2px 0 4px}
 .set-head .lab{font-size:10px}
 .set-row{padding:4px 0;border-radius:10px}

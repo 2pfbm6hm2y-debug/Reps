@@ -2,7 +2,8 @@
 
 A workout log for two. It remembers what you lifted last time, tells you when to go heavier, and lets you and your training partner see each other's progress. It runs on the phone and works offline at the gym.
 
-- **Last time, on every set.** Each set shows last session's weight and reps, and the weight is filled in for you. Tick a set when it's done.
+- **Last time, on every set.** Each set shows last session's weight and reps, and the weight is filled in for you. Change it on one set and the sets after it follow, or nudge it with − and +. Tick a set when it's done.
+- **Cardio with level or incline.** Log minutes plus the treadmill incline or machine level, filled in from last time.
 - **Rest timer.** Ticking a set starts the rest timer for that exercise, with a beep and buzz when it's time. Supersets rest only after both exercises.
 - **When to go heavier.** Once you hit the top of the rep range on every set, the exercise shows a suggested next weight. For assisted pull-ups it suggests less assistance.
 - **Progress.** Every exercise gets a chart (heaviest weight, estimated 1-rep max or volume), and finished workouts count new bests. Weeks on target track your weekly goal.

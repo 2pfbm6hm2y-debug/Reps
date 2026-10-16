@@ -3,7 +3,7 @@
    training partners on different phones can see each other's workouts and progress. */
 'use strict';
 
-const VERSION = '1.0.1';
+const VERSION = '1.1.0';
 const LS_KEY = 'reps:v1';
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -45,7 +45,7 @@ const EX = [
   ['plank', 'Plank', 't', 'Core', 'Bodyweight', 5],
   ['side-plank', 'Side plank', 't', 'Core', 'Bodyweight', 5, { side: 1 }],
   ['dead-bug', 'Dead bug', 'bw', 'Core', 'Bodyweight', 1, { side: 1 }],
-  ['incline-walk', 'Incline walk', 'c', 'Cardio', 'Treadmill', 1],
+  ['incline-walk', 'Incline walk', 'c', 'Cardio', 'Treadmill', 1, { lvl: 'incline' }],
   ['bike', 'Bike', 'c', 'Cardio', 'Machine', 1],
   ['rower', 'Rower', 'c', 'Cardio', 'Machine', 1],
   ['elliptical', 'Elliptical', 'c', 'Cardio', 'Machine', 1],
@@ -174,18 +174,22 @@ function targetText(it, ex) {
   const side = ex.side ? (ex.type === 't' ? ' each side' : '/side') : '';
   return `${it.n} × ${reps}${side} · ${fmtRest(it.rest)}`;
 }
-function fmtSet(type, s, short) {
+const lvlName = ex => (ex && ex.lvl) || 'level';
+// t is an exercise or just its type. Cardio needs the exercise to say "incline" or "level".
+function fmtSet(t, s, short) {
   if (!s) return '';
+  const ex = typeof t === 'object' ? t : null, type = ex ? ex.type : t;
   const x = short ? '×' : ' × ';
   if (type === 'w') return s.w ? `${fmtN(s.w)}${short ? '' : ' kg'}${x}${s.r || 0}` : `${s.r || 0} reps`;
   if (type === 'a') return `${short ? '−' : 'assist '}${fmtN(s.w || 0)}${short ? '' : ' kg'}${x}${s.r || 0}`;
   if (type === 'bw') return `${s.r || 0} reps`;
   if (type === 't') return `${s.t || 0} s`;
-  if (type === 'c') return `${fmtN(s.m || 0)} min`;
+  if (type === 'c') return `${fmtN(s.m || 0)}${short ? "'" : ' min'}${s.l ? (short ? ` · ${fmtN(s.l)}` : ` · ${lvlName(ex)} ${fmtN(s.l)}`) : ''}`;
   return '';
 }
-const fieldsFor = type => (type === 'w' || type === 'a' ? ['w', 'r'] : type === 'bw' ? ['r'] : type === 't' ? ['t'] : ['m']);
-const FIELD_LABEL = { w: 'kg', r: 'reps', t: 'sec', m: 'min' };
+const fieldsFor = type => (type === 'w' || type === 'a' ? ['w', 'r'] : type === 'bw' ? ['r'] : type === 't' ? ['t'] : ['m', 'l']);
+const FIELD_LABEL = { w: 'kg', r: 'reps', t: 'sec', m: 'min', l: 'level' };
+const hasStep = type => type === 'w' || type === 'a';
 
 /* ---------- history lookups ---------- */
 function lastEntry(pid, ex, beforeStart, skipId) {
@@ -222,7 +226,7 @@ function computePRs(w) {
       o.items.forEach(oi => { if (oi.ex === it.ex && oi.sets.length) { had = true; prior = Math.max(prior, score(ex.type, oi.sets)); } });
     });
     const now = score(ex.type, it.sets);
-    if (had && now != null && now > prior + 1e-9) prs.push({ ex: it.ex, label: fmtSet(ex.type, bestSet(ex.type, it.sets)) });
+    if (had && now != null && now > prior + 1e-9) prs.push({ ex: it.ex, label: fmtSet(ex, bestSet(ex.type, it.sets)) });
   });
   return prs;
 }
@@ -367,7 +371,8 @@ function makeItem(pid, t, before) {
   for (let i = 0; i < (t.n || 1); i++) {
     const p = ps[i] || ps[ps.length - 1];
     const ex = exById(t.ex);
-    sets.push({ w: (ex.type === 'w' || ex.type === 'a') && p && p.w != null ? p.w : null, r: null, t: null, m: null, done: false });
+    const w = hasStep(ex.type) && p && p.w != null ? p.w : null;
+    sets.push({ w, r: null, t: null, m: null, l: ex.type === 'c' && p && p.l != null ? p.l : null, done: false, auto: w != null });
   }
   return { k: uid(), ex: t.ex, n: t.n, lo: t.lo, hi: t.hi, rest: t.rest, g: t.g || null, sets };
 }
@@ -407,11 +412,12 @@ function exCard(it) {
   const prev = lastEntry(a.person, it.ex, a.editing ? a.start : null, a.id);
   const ps = prev ? prev.it.sets : [];
   const f = fieldsFor(ex.type);
-  const head = f.map(x => `<span class="lab" style="text-align:center">${x === 'w' ? (ex.type === 'a' ? 'assist' : ex.each ? 'kg each' : 'kg') : FIELD_LABEL[x]}</span>`).join('');
+  const head = f.map(x => `<span class="lab" style="text-align:center">${x === 'w' ? (ex.type === 'a' ? 'assist kg' : ex.each ? 'kg each' : 'kg') : x === 'l' ? lvlName(ex) : FIELD_LABEL[x]}</span>`).join('');
+  const cls = hasStep(ex.type) ? 'cw' : 'c' + f.length;
   return `<section class="ex" id="ex-${it.k}">
     <div class="ex-top"><div><h3>${esc(ex.name)}</h3><p class="tgt">${esc(targetText(it, ex))}</p></div><button class="icon-btn" data-act="ex-menu" data-k="${it.k}" aria-label="Options for ${esc(ex.name)}">${I.dots}</button></div>
     ${hintFor(it, ex, prev)}
-    <div class="sets"><div class="set-head c${f.length}"><span class="lab" style="text-align:center">set</span><span class="lab">last time</span>${head}<span></span></div>
+    <div class="sets"><div class="set-head ${cls}"><span class="lab" style="text-align:center">set</span><span class="lab">last</span>${head}<span></span></div>
     ${it.sets.map((s, i) => setRow(it, ex, s, i, ps[i])).join('')}</div>
     <div class="ex-foot"><button class="btn small quiet" data-act="set-add" data-k="${it.k}">${I.plus} Set</button>${it.sets.length > 1 ? `<button class="btn small quiet" data-act="set-remove" data-k="${it.k}">${I.minus} Set</button>` : ''}</div>
   </section>`;
@@ -421,12 +427,18 @@ function placeholderFor(f, p, it) {
   if (f === 'r') return p && p.r != null ? p.r : (it.hi || '');
   if (f === 't') return p && p.t != null ? p.t : (it.lo || '');
   if (f === 'm') return p && p.m != null ? fmtN(p.m) : (it.lo || '');
+  if (f === 'l') return p && p.l != null ? fmtN(p.l) : '';
   return '';
 }
 function setRow(it, ex, s, i, p) {
   const f = fieldsFor(ex.type);
-  const inputs = f.map(x => `<input class="in num" data-f="${x}" inputmode="${x === 'r' || x === 't' ? 'numeric' : 'decimal'}" enterkeyhint="done" value="${s[x] == null ? '' : fmtN(s[x])}" placeholder="${esc(placeholderFor(x, p, it))}" aria-label="Set ${i + 1} ${FIELD_LABEL[x]}">`).join('');
-  return `<div class="set-row c${f.length}${s.done ? ' done' : ''}" data-k="${it.k}" data-i="${i}"><span class="sn">${i + 1}</span><span class="prev num">${p ? esc(fmtSet(ex.type, p, true)) : '—'}</span>${inputs}<button class="tick" data-act="tick" aria-label="Set ${i + 1} done" aria-pressed="${s.done ? 'true' : 'false'}">${I.check}</button></div>`;
+  const step = hasStep(ex.type);
+  const inputs = f.map(x => {
+    const inp = `<input class="in num" data-f="${x}" inputmode="${x === 'r' || x === 't' ? 'numeric' : 'decimal'}" enterkeyhint="done" value="${s[x] == null ? '' : fmtN(s[x])}" placeholder="${esc(placeholderFor(x, p, it))}" aria-label="Set ${i + 1} ${x === 'l' ? lvlName(ex) : FIELD_LABEL[x]}">`;
+    if (x !== 'w' || !step) return inp;
+    return `<span class="wcell"><button class="step" data-act="step" data-d="-1" aria-label="Less weight, set ${i + 1}">${I.minus}</button>${inp}<button class="step" data-act="step" data-d="1" aria-label="More weight, set ${i + 1}">${I.plus}</button></span>`;
+  }).join('');
+  return `<div class="set-row ${step ? 'cw' : 'c' + f.length}${s.done ? ' done' : ''}" data-k="${it.k}" data-i="${i}"><span class="sn">${i + 1}</span><span class="prev num">${p ? esc(fmtSet(ex, p, true)) : '—'}</span>${inputs}<button class="tick" data-act="tick" aria-label="Set ${i + 1} done" aria-pressed="${s.done ? 'true' : 'false'}">${I.check}</button></div>`;
 }
 function hintFor(it, ex, prev) {
   if (!prev) {
@@ -464,6 +476,31 @@ function onSetInput(inp) {
   const s = it.sets[Number(row.dataset.i)]; if (!s) return;
   s[inp.dataset.f] = parseNum(inp.value);
   inp.classList.remove('flag');
+  if (inp.dataset.f === 'w' || inp.dataset.f === 'l') { s.auto = false; carryDown(it, Number(row.dataset.i), inp.dataset.f); }
+  save();
+}
+// A weight typed or stepped on one set flows into the sets after it, until a set you changed yourself.
+function carryDown(it, i, f) {
+  const v = it.sets[i][f];
+  const card = document.getElementById('ex-' + it.k);
+  for (let j = i + 1; j < it.sets.length; j++) {
+    const t = it.sets[j];
+    if (t.done) continue;
+    if (!(t.auto || t[f] == null)) break;
+    t[f] = v; t.auto = true;
+    const el = card && card.querySelector(`.set-row[data-i="${j}"] [data-f="${f}"]`);
+    if (el) { el.value = v == null ? '' : fmtN(v); el.classList.remove('flag'); }
+  }
+}
+function stepWeight(btn) {
+  const row = btn.closest('.set-row'), it = itemOf(row.dataset.k); if (!it) return;
+  const i = Number(row.dataset.i), s = it.sets[i], ex = exById(it.ex), inp = row.querySelector('[data-f="w"]');
+  const before = [...it.sets.slice(0, i)].reverse().find(x => x.w != null);
+  const base = s.w != null ? s.w : parseNum(inp.placeholder) != null ? parseNum(inp.placeholder) : before ? before.w : 0;
+  s.w = Math.max(0, Math.round((base + Number(btn.dataset.d) * (ex.inc || 2.5)) * 100) / 100);
+  s.auto = false;
+  inp.value = fmtN(s.w); inp.classList.remove('flag');
+  carryDown(it, i, 'w');
   save();
 }
 function tick(btn) {
@@ -477,7 +514,7 @@ function tick(btn) {
     const inp = row.querySelector(`[data-f="${f}"]`);
     if (s[f] == null) {
       const v = parseNum(inp.placeholder);
-      if (v == null) { if (!missing) missing = inp; inp.classList.add('flag'); }
+      if (v == null) { if (f !== 'l' && !missing) { missing = inp; inp.classList.add('flag'); } }
       else { s[f] = v; inp.value = fmtN(v); }
     }
   });
@@ -552,7 +589,7 @@ function finishSheet() {
 function toRecord(a) {
   const base = a.editing ? clone(D.records[a.id]) : { id: a.id, kind: 'workout', person: a.person, routine: a.routine, name: a.name, start: a.start, end: Date.now() };
   base.items = a.items.map(it => ({ ex: it.ex, n: it.n, lo: it.lo, hi: it.hi, sets: it.sets.filter(s => s.done).map(s => {
-    const o = {}; fieldsFor(exById(it.ex).type).forEach(f => { o[f] = s[f] == null ? 0 : s[f]; }); return o;
+    const o = {}; fieldsFor(exById(it.ex).type).forEach(f => { if (s[f] != null) o[f] = s[f]; else if (f !== 'l') o[f] = 0; }); return o;
   }) })).filter(it => it.sets.length);
   return base;
 }
@@ -573,7 +610,7 @@ function editWorkout(id) {
   if (D.active && !D.active.editing) { toast('Finish or discard the workout in progress first.'); return; }
   const w = D.records[id];
   D.active = { id: w.id, kind: 'workout', person: w.person, routine: w.routine, name: w.name, start: w.start, end: w.end, editing: true,
-    items: w.items.map(it => Object.assign({}, it, { k: uid(), g: null, rest: 0, sets: it.sets.map(s => Object.assign({ w: null, r: null, t: null, m: null }, s, { done: true })) })) };
+    items: w.items.map(it => Object.assign({}, it, { k: uid(), g: null, rest: 0, sets: it.sets.map(s => Object.assign({ w: null, r: null, t: null, m: null, l: null }, s, { done: true, auto: false })) })) };
   save(); closeSheet(); S.view = 'workout'; render(); window.scrollTo(0, 0);
 }
 
@@ -588,7 +625,7 @@ const METRICS = {
   a: [['assist', 'Assistance (lower is better)', 'kg']],
   bw: [['reps', 'Most reps', 'reps']],
   t: [['hold', 'Longest hold', 's']],
-  c: [['mins', 'Minutes', 'min']],
+  c: [['mins', 'Minutes', 'min'], ['level', 'Level', '']],
 };
 function metricVal(m, sets) {
   if (m === 'top') return Math.max(...sets.map(s => s.w || 0));
@@ -598,6 +635,7 @@ function metricVal(m, sets) {
   if (m === 'reps') return Math.max(...sets.map(s => s.r || 0));
   if (m === 'hold') return Math.max(...sets.map(s => s.t || 0));
   if (m === 'mins') return sets.reduce((n, s) => n + (s.m || 0), 0);
+  if (m === 'level') return Math.max(0, ...sets.map(s => s.l || 0));
   return 0;
 }
 function streakWeeks(pid) {
@@ -643,7 +681,7 @@ function renderProgress() {
     const unit = METRICS[ex.type][0][2];
     const better = ex.type === 'a' ? d < 0 : d > 0;
     const change = ss.length > 1 && d !== 0 ? `<span class="${better ? 'up' : ''}">${d > 0 ? '+' : '−'}${fmtN(Math.abs(d))} ${unit}</span>` : `<span class="muted">${ss.length} session${ss.length > 1 ? 's' : ''}</span>`;
-    const label = ex.type === 'c' ? fmtSet('c', { m: metricVal('mins', lastS.sets) }) : fmtSet(ex.type, bestSet(ex.type, lastS.sets));
+    const label = ex.type === 'c' ? fmtSet(ex, { m: metricVal('mins', lastS.sets), l: metricVal('level', lastS.sets) }) : fmtSet(ex, bestSet(ex.type, lastS.sets));
     return `<button class="row" data-act="open-ex" data-ex="${esc(id)}" data-p="${pid}"><span><span class="row-name">${esc(ex.name)}</span><span class="row-meta">${esc(label)} · ${fmtWhen(lastS.t)}</span></span><span class="row-side">${change}${vals.length > 1 ? spark(vals, pcls(pid)) : ''}</span></button>`;
   }).join('')}</div>`;
   return h;
@@ -712,11 +750,11 @@ function exSheet(exId, pid, metric) {
   const ss = sessionsFor(pid, exId).reverse();
   const html = `<div class="sheet-head"><div><span class="lab">${esc(ex.m || '')}</span><h2>${esc(ex.name)}</h2></div>${closeBtn()}</div>
     <div class="stack">
-      ${ms.length > 1 ? `<div class="seg">${ms.map(x => `<button data-act="ex-metric" data-ex="${esc(exId)}" data-p="${pid}" data-m="${x[0]}" aria-pressed="${x[0] === m[0]}">${x[1]}</button>`).join('')}</div>` : `<p class="small muted">${m[1]}</p>`}
+      ${ms.length > 1 ? `<div class="seg">${ms.map(x => `<button data-act="ex-metric" data-ex="${esc(exId)}" data-p="${pid}" data-m="${x[0]}" aria-pressed="${x[0] === m[0]}">${x[0] === 'level' ? (ex.lvl === 'incline' ? 'Incline' : 'Level') : x[1]}</button>`).join('')}</div>` : `<p class="small muted">${m[1]}</p>`}
       ${m[0] === 'e1rm' ? '<p class="small muted">An estimate of the most you could lift once, worked out from your weight and reps. It goes up when either one does.</p>' : ''}
       <div class="card flat">${series.length ? chart(series, m[2], 'ex') : '<p class="muted">No sessions yet.</p>'}</div>
       ${people().length > 1 ? personChips(pid, 'ex-person').replace(/data-act="ex-person"/g, `data-act="ex-person" data-ex="${esc(exId)}" data-m="${m[0]}"`) : ''}
-      <div class="list">${ss.length ? ss.map(s => `<button class="row" data-act="open-wk" data-w="${s.w.id}"><span><span class="row-name">${fmtDay(s.t)}</span><span class="row-meta">${esc(s.sets.map(x => fmtSet(ex.type, x)).join(', '))}</span></span><span class="row-side">${(s.w.prs || []).some(p => p.ex === exId) ? '<span class="pill good">Best</span>' : ''}</span></button>`).join('') : `<p class="muted" style="padding:12px 0">${esc(pname(pid))} hasn't done this one yet.</p>`}</div>
+      <div class="list">${ss.length ? ss.map(s => `<button class="row" data-act="open-wk" data-w="${s.w.id}"><span><span class="row-name">${fmtDay(s.t)}</span><span class="row-meta">${esc(s.sets.map(x => fmtSet(ex, x)).join(', '))}</span></span><span class="row-side">${(s.w.prs || []).some(p => p.ex === exId) ? '<span class="pill good">Best</span>' : ''}</span></button>`).join('') : `<p class="muted" style="padding:12px 0">${esc(pname(pid))} hasn't done this one yet.</p>`}</div>
     </div>`;
   openSheet({ kind: 'html', html });
 }
@@ -750,7 +788,7 @@ function workoutSheet(id) {
   const mine = w.person === D.me;
   const prEx = new Set((w.prs || []).map(p => p.ex));
   openSheet({ kind: 'html', html: `<div class="sheet-head"><div><span class="lab"><span class="dot ${pcls(w.person)}" style="display:inline-block;margin-right:6px"></span>${esc(pname(w.person))}</span><h2>${esc(w.name)}</h2><p class="small muted">${fmtDay(w.start)} · ${fmtDur((w.end || w.start) - w.start)}</p></div>${closeBtn()}</div>
-    <div class="stack"><div class="card flat ws">${w.items.map(it => { const ex = exById(it.ex); const best = prEx.has(it.ex) ? bestSet(ex.type, it.sets) : null; return `<div class="ws-ex"><h3>${esc(ex.name)}${prEx.has(it.ex) ? ' <span class="pill good">New best</span>' : ''}</h3><div class="ws-sets">${it.sets.map(s => `<span class="num${s === best ? ' pr' : ''}">${esc(fmtSet(ex.type, s))}</span>`).join('')}</div></div>`; }).join('')}</div>
+    <div class="stack"><div class="card flat ws">${w.items.map(it => { const ex = exById(it.ex); const best = prEx.has(it.ex) ? bestSet(ex.type, it.sets) : null; return `<div class="ws-ex"><h3>${esc(ex.name)}${prEx.has(it.ex) ? ' <span class="pill good">New best</span>' : ''}</h3><div class="ws-sets">${it.sets.map(s => `<span class="num${s === best ? ' pr' : ''}">${esc(fmtSet(ex, s))}</span>`).join('')}</div></div>`; }).join('')}</div>
     ${mine ? `<div class="btn-row"><button class="btn" data-act="wk-edit" data-w="${w.id}">${I.edit} Edit</button><button class="btn danger" data-act="wk-delete" data-w="${w.id}">${I.trash} Delete</button></div>` : ''}</div>` });
 }
 
@@ -1075,8 +1113,9 @@ const ACT = {
   'wk-discard': el => armed(el, () => { D.active = null; S.rest = null; save(); wake(false); S.view = null; render(); toast('Workout discarded.'); }),
   'wk-cancel-edit': () => { D.active = null; S.rest = null; save(); S.view = null; S.tab = 'history'; render(); },
   tick: el => tick(el),
-  apply: el => { const it = itemOf(el.dataset.k); if (!it) return; it.sets.forEach(s => { if (!s.done) s.w = Number(el.dataset.v); }); save(); redrawCard(it.k); },
-  'set-add': el => { const it = itemOf(el.dataset.k); const l = it.sets[it.sets.length - 1] || {}; it.sets.push({ w: l.w == null ? null : l.w, r: null, t: null, m: null, done: false }); save(); redrawCard(it.k); },
+  apply: el => { const it = itemOf(el.dataset.k); if (!it) return; it.sets.forEach(s => { if (!s.done) { s.w = Number(el.dataset.v); s.auto = true; } }); save(); redrawCard(it.k); },
+  step: el => stepWeight(el),
+  'set-add': el => { const it = itemOf(el.dataset.k); const l = it.sets[it.sets.length - 1] || {}; it.sets.push({ w: l.w == null ? null : l.w, r: null, t: null, m: null, l: l.l == null ? null : l.l, done: false, auto: l.w != null }); save(); redrawCard(it.k); },
   'set-remove': el => { const it = itemOf(el.dataset.k); if (it.sets.length > 1) it.sets.pop(); save(); redrawCard(it.k); },
   'ex-menu': el => {
     const k = el.dataset.k, it = itemOf(k), idx = D.active.items.indexOf(it), ex = exById(it.ex);
