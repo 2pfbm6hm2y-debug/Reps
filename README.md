@@ -14,7 +14,7 @@ A workout log for two. It remembers what you lifted last time, tells you when to
 
 1. In this repository, go to **Settings > Pages**.
 2. Set Source to **Deploy from a branch**, Branch to **main** and folder **/ (root)**. Save.
-3. After a minute the site is live at `https://2pfbm6hm2y-debug.github.io/reps/`.
+3. After a minute the site is live at `https://2pfbm6hm2y-debug.github.io/Reps/`.
 
 The repo holds only the app. Your workouts are never in it.
 
