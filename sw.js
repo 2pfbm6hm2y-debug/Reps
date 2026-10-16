@@ -1,8 +1,8 @@
 /* Reps service worker: makes the app open offline. The sync script on Google is never cached. */
-const APP_CACHE = 'reps-app-1.0.0';
+const APP_CACHE = 'reps-app-1.0.1';
 const FONT_CACHE = 'reps-fonts-1';
 const APP_FILES = ['./', './index.html', './app.js', './sync.gs', './manifest.webmanifest',
-  './icons/plates-180.png', './icons/plates-192.png', './icons/plates-512.png'];
+  './icons/kettlebells-180.png', './icons/kettlebells-192.png', './icons/kettlebells-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {

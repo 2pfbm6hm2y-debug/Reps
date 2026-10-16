@@ -3,7 +3,7 @@
    training partners on different phones can see each other's workouts and progress. */
 'use strict';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const LS_KEY = 'reps:v1';
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -303,7 +303,7 @@ function renderStart() {
       <button class="btn primary wide" data-act="start">Start with Workout A and B</button>
       <button class="link" data-act="start-mode" data-m="join">Have an invite code from your partner? Join instead</button></div>`;
   }
-  return `<div class="welcome"><img class="welcome-mark" src="icons/plates-180.png" alt="">
+  return `<div class="welcome"><img class="welcome-mark" src="icons/kettlebells-180.png" alt="">
     <div class="hero"><span class="brand">Reps</span><h1>Lifting gets easier when you can see it.</h1></div>
     ${painsHtml()}${form}</div>`;
 }
