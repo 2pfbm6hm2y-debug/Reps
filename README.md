@@ -9,7 +9,8 @@ A workout log for two. It remembers what you lifted last time, tells you when to
 - **Rest timer.** Ticking a set starts the rest timer for that exercise, with a beep and buzz when it's time. Supersets rest only after both exercises.
 - **When to go heavier.** Once you hit the top of the rep range on every set, the exercise shows a suggested next weight. For assisted pull-ups it suggests less assistance.
 - **Progress.** Every exercise gets a chart (heaviest weight, estimated 1-rep max or volume), and finished workouts count new bests. Weeks on target track your weekly goal.
-- **Train together.** You each log on your own phone. A small Google script keeps a shared copy, so you can see each other's workouts, plans and charts side by side.
+- **Train together on one phone.** Add your partner in **More > People on this phone**. You follow the same workout, each with your own set table, weights, history and progress. Rest starts once you've both done the set.
+- **Or on separate phones.** A small Google script keeps a shared copy, so you can see each other's workouts, plans and charts side by side.
 - **Your plan.** Starts with Workout A and Workout B, which take turns. Change exercises, sets, rep ranges, rest times and supersets in **Plan**.
 - **Body weight, if you like.** Log it in **Progress**. It stays on your phone unless you choose to share it.
 

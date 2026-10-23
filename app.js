@@ -3,7 +3,7 @@
    training partners on different phones can see each other's workouts and progress. */
 'use strict';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const LS_KEY = 'reps:v1';
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -145,6 +145,8 @@ function load() {
   return blank();
 }
 let D = load();
+if (!D.device) D.device = uid();
+try { normActive(D.active); } catch (e) { D.active = null; }
 let saveFailed = false;
 function save() {
   try { localStorage.setItem(LS_KEY, JSON.stringify(D)); saveFailed = false; }
@@ -163,6 +165,9 @@ function remove(rec) { rec.deleted = true; put(rec); }
 const recs = (kind, person) => Object.values(D.records).filter(r => r.kind === kind && !r.deleted && (person == null || r.person === person));
 const people = () => recs('person').sort((a, b) => a.created - b.created);
 const me = () => (D.me && D.records[D.me] && !D.records[D.me].deleted ? D.records[D.me] : null);
+// People who log on this phone: you, plus anyone added here to train with you.
+const localPeople = () => people().filter(p => p.id === D.me || p.home === D.device);
+const crewOn = () => { const off = D.settings.crewOff || []; return localPeople().filter(p => p.id !== D.me && !off.includes(p.id)); };
 const pcls = pid => 'pc' + Math.max(0, people().findIndex(p => p.id === pid)) % 3;
 const pname = pid => (D.records[pid] ? D.records[pid].name : 'Someone');
 const routines = pid => recs('routine', pid).sort((a, b) => (a.order - b.order) || (a.created - b.created));
@@ -170,9 +175,9 @@ const workouts = pid => recs('workout', pid).sort((a, b) => b.start - a.start);
 const exById = id => EX_BY[id] || (D.records[id] && D.records[id].kind === 'exercise' ? D.records[id] : { id, name: 'Exercise', type: 'w', m: 'Other', inc: 2.5 });
 const allExercises = () => EX.concat(recs('exercise').sort((a, b) => a.name.localeCompare(b.name)));
 
-function createPerson(name) {
-  const p = put({ id: uid(), kind: 'person', name: name.trim().slice(0, 30), created: Date.now() });
-  TEMPLATES.forEach((t, i) => put({ id: uid(), kind: 'routine', person: p.id, name: t.name, order: i, created: Date.now() + i, items: t.items.map(x => Object.assign({ k: uid() }, x)) }));
+function createPerson(name, noPlan) {
+  const p = put({ id: uid(), kind: 'person', name: name.trim().slice(0, 30), created: Date.now(), home: D.device });
+  if (!noPlan) TEMPLATES.forEach((t, i) => put({ id: uid(), kind: 'routine', person: p.id, name: t.name, order: i, created: Date.now() + i, items: t.items.map(x => Object.assign({ k: uid() }, x)) }));
   return p;
 }
 
@@ -343,6 +348,12 @@ function renderStart() {
 }
 
 /* ---------- today ---------- */
+function crewPicker() {
+  const others = localPeople().filter(p => p.id !== D.me);
+  if (!others.length) return '';
+  const off = D.settings.crewOff || [];
+  return `<p class="lab" style="margin-bottom:6px">Who's training</p><div class="chips" style="margin-bottom:12px"><span class="chip ${pcls(D.me)}" aria-pressed="true"><span class="dot"></span>${esc(me().name)}</span>${others.map(o => `<button class="chip ${pcls(o.id)}" data-act="crew" data-p="${o.id}" aria-pressed="${!off.includes(o.id)}"><span class="dot"></span>${esc(o.name)}</button>`).join('')}</div>`;
+}
 function renderToday() {
   const p = me(), now = Date.now();
   const nx = nextRoutine(p.id);
@@ -352,6 +363,7 @@ function renderToday() {
   } else if (nx) {
     const names = nx.items.map(i => exById(i.ex).name);
     h += `<div class="card"><h2>${esc(nx.name)}</h2><div class="next-list">${names.map(n => `<span>${esc(n)}</span>`).join('')}</div>
+      ${crewPicker()}
       <button class="btn primary wide" data-act="start-wk" data-r="${nx.id}">${I.play} Start ${esc(nx.name)}</button>
       <div class="alt-row">${routines(p.id).filter(r => r.id !== nx.id).map(r => `<button class="link" data-act="start-wk" data-r="${r.id}">Do ${esc(r.name)} instead</button>`).join('')}<button class="link" data-act="start-wk" data-r="">Empty workout</button></div></div>`;
   } else {
@@ -376,7 +388,7 @@ function renderToday() {
       return `<button class="mate ${pcls(o.id)}" data-act="${lw ? 'open-wk' : 'view-progress'}" data-w="${lw ? lw.id : ''}" data-p="${o.id}"><span class="dot"></span><span><span class="mate-name">${esc(o.name)}</span><span class="mate-meta" style="display:block">${meta}</span></span><span class="pill">${wk} this week</span></button>`;
     }).join('')}</div>`;
   } else if (!syncOn()) {
-    h += `<div class="sec-head"><h2>Training together</h2></div><div class="note">Want to see your partner's progress? Set up sharing in <button class="link" data-act="tab" data-tab="more">More › Train together</button>.</div>`;
+    h += `<div class="sec-head"><h2>Training together</h2></div><div class="note">Training with someone? Add them in <button class="link" data-act="tab" data-tab="more">More › People on this phone</button> and log both of you here.</div>`;
   }
   // recent bests
   const bests = [];
@@ -386,7 +398,17 @@ function renderToday() {
   }
   return h;
 }
-const countDone = a => a.items.reduce((n, it) => n + it.sets.filter(s => s.done).length, 0);
+const crewOf = a => (a.crew && a.crew.length ? a.crew : [a.person]);
+const setsOf = (it, pid) => (it.by && it.by[pid]) || [];
+const allSets = it => Object.values(it.by || {}).flat();
+const countDone = a => a.items.reduce((n, it) => n + allSets(it).filter(s => s.done).length, 0);
+// Older saved workouts in progress kept one list of sets per exercise.
+function normActive(a) {
+  if (!a) return;
+  if (!a.crew) a.crew = [a.person];
+  if (!a.ids) a.ids = { [a.person]: a.id };
+  a.items.forEach(it => { if (!it.by) { it.by = { [a.person]: it.sets || [] }; delete it.sets; } });
+}
 
 /* ---------- workout ---------- */
 function defaultsFor(ex) {
@@ -394,22 +416,28 @@ function defaultsFor(ex) {
   if (ex.type === 't') return { n: 3, lo: 20, hi: 30, rest: 60 };
   return { n: 3, lo: 8, hi: 12, rest: 90 };
 }
-function makeItem(pid, t, before) {
+function freshSets(pid, t, before) {
   const prev = lastEntry(pid, t.ex, before);
   const ps = prev ? prev.it.sets : [];
-  const sets = [];
+  const ex = exById(t.ex), sets = [];
   for (let i = 0; i < (t.n || 1); i++) {
     const p = ps[i] || ps[ps.length - 1];
-    const ex = exById(t.ex);
     const w = !hasStep(ex.type) ? null : p ? (p.w != null ? p.w : null) : startOf(pid, t.ex);
     sets.push({ w, r: null, t: null, m: null, l: ex.type === 'c' && p && p.l != null ? p.l : null, done: false, auto: w != null });
   }
-  return { k: uid(), ex: t.ex, n: t.n, lo: t.lo, hi: t.hi, rest: t.rest, g: t.g || null, sets };
+  return sets;
+}
+function makeItem(pids, t, before) {
+  const by = {};
+  pids.forEach(pid => { by[pid] = freshSets(pid, t, before); });
+  return { k: uid(), ex: t.ex, n: t.n, lo: t.lo, hi: t.hi, rest: t.rest, g: t.g || null, by };
 }
 function startWorkout(rid) {
   if (D.active) { S.view = 'workout'; render(); wake(true); return; }
   const r = rid ? D.records[rid] : null;
-  D.active = { id: uid(), kind: 'workout', person: D.me, routine: r ? r.id : null, name: r ? r.name : 'Workout', start: Date.now(), items: (r ? r.items : []).map(t => makeItem(D.me, t)) };
+  const crew = [D.me].concat(crewOn().map(p => p.id));
+  const ids = {}; crew.forEach(pid => { ids[pid] = uid(); });
+  D.active = { id: ids[D.me], ids, crew, kind: 'workout', person: D.me, routine: r ? r.id : null, name: r ? r.name : 'Workout', start: Date.now(), items: (r ? r.items : []).map(t => makeItem(crew, t)) };
   save();
   S.view = 'workout';
   render();
@@ -420,7 +448,7 @@ function startWorkout(rid) {
 function renderWorkout() {
   const a = D.active;
   let h = `<header class="wk-head"><button class="icon-btn" data-act="wk-hide" aria-label="Back to Today">${I.back}</button>
-    <div class="wk-title"><h2>${esc(a.name)}</h2><p class="lab num" id="wk-clock">${a.editing ? fmtDay(a.start) : mmss((Date.now() - a.start) / 1000)}</p></div>
+    <div class="wk-title"><h2>${esc(a.name)}</h2><p class="lab num">${crewOf(a).length > 1 ? `${crewOf(a).map(pid => esc(pname(pid))).join(' & ')} · ` : ''}<span id="wk-clock">${a.editing ? fmtDay(a.start) : mmss((Date.now() - a.start) / 1000)}</span></p></div>
     <button class="btn small primary" data-act="wk-finish">${a.editing ? 'Save' : 'Finish'}</button></header><div class="wk-body">`;
   const items = a.items;
   if (!items.length) h += `<div class="empty"><p>Add the first exercise to get going.</p></div>`;
@@ -438,19 +466,22 @@ function renderWorkout() {
   return h;
 }
 function exCard(it) {
-  const a = D.active, ex = exById(it.ex);
-  const prev = lastEntry(a.person, it.ex, a.editing ? a.start : null, a.id);
-  const ps = prev ? prev.it.sets : [];
+  const a = D.active, ex = exById(it.ex), crew = crewOf(a);
   const f = fieldsFor(ex.type);
   const head = f.map(x => `<span class="lab" style="text-align:center">${x === 'w' ? (ex.type === 'a' ? 'assist kg' : ex.each ? 'kg each' : 'kg') : x === 'l' ? lvlName(ex) : FIELD_LABEL[x]}</span>`).join('');
   const cls = hasStep(ex.type) ? 'cw' : 'c' + f.length;
   return `<section class="ex" id="ex-${it.k}">
     <div class="ex-top"><div><h3>${esc(ex.name)}</h3><p class="tgt">${esc(targetText(it, ex))}</p>${TIPS[ex.id] ? `<button class="tips-btn" data-act="tips" data-k="${it.k}" aria-expanded="${!!(S.tips && S.tips[it.k])}">${I.info} ${S.tips && S.tips[it.k] ? 'Hide tips' : 'Form tips'}</button>` : ''}</div><button class="icon-btn" data-act="ex-menu" data-k="${it.k}" aria-label="Options for ${esc(ex.name)}">${I.dots}</button></div>
     ${S.tips && S.tips[it.k] ? tipsHtml(ex.id) : ''}
-    ${hintFor(it, ex, prev)}
-    <div class="sets"><div class="set-head ${cls}"><span class="lab" style="text-align:center">set</span><span class="lab">last</span>${head}<span></span></div>
-    ${it.sets.map((s, i) => setRow(it, ex, s, i, ps[i])).join('')}</div>
-    <div class="ex-foot"><button class="btn small quiet" data-act="set-add" data-k="${it.k}">${I.plus} Set</button>${it.sets.length > 1 ? `<button class="btn small quiet" data-act="set-remove" data-k="${it.k}">${I.minus} Set</button>` : ''}</div>
+    ${crew.map(pid => {
+      const prev = lastEntry(pid, it.ex, a.editing ? a.start : null, a.ids ? a.ids[pid] : a.id);
+      const ps = prev ? prev.it.sets : [], sets = setsOf(it, pid);
+      return `<div class="who-block">${crew.length > 1 ? `<p class="who ${pcls(pid)}"><span class="dot"></span>${esc(pname(pid))}</p>` : ''}
+        ${hintFor(it, ex, prev, pid)}
+        <div class="sets"><div class="set-head ${cls}"><span class="lab" style="text-align:center">set</span><span class="lab">last</span>${head}<span></span></div>
+        ${sets.map((s, i) => setRow(it, ex, s, i, ps[i], pid)).join('')}</div>
+        <div class="ex-foot"><button class="btn small quiet" data-act="set-add" data-k="${it.k}" data-p="${pid}">${I.plus} Set</button>${sets.length > 1 ? `<button class="btn small quiet" data-act="set-remove" data-k="${it.k}" data-p="${pid}">${I.minus} Set</button>` : ''}</div></div>`;
+    }).join('')}
   </section>`;
 }
 function placeholderFor(f, p, it) {
@@ -461,7 +492,7 @@ function placeholderFor(f, p, it) {
   if (f === 'l') return p && p.l != null ? fmtN(p.l) : '';
   return '';
 }
-function setRow(it, ex, s, i, p) {
+function setRow(it, ex, s, i, p, pid) {
   const f = fieldsFor(ex.type);
   const step = hasStep(ex.type);
   const inputs = f.map(x => {
@@ -469,11 +500,11 @@ function setRow(it, ex, s, i, p) {
     if (x !== 'w' || !step) return inp;
     return `<span class="wcell"><button class="step" data-act="step" data-d="-1" aria-label="Less weight, set ${i + 1}">${I.minus}</button>${inp}<button class="step" data-act="step" data-d="1" aria-label="More weight, set ${i + 1}">${I.plus}</button></span>`;
   }).join('');
-  return `<div class="set-row ${step ? 'cw' : 'c' + f.length}${s.done ? ' done' : ''}" data-k="${it.k}" data-i="${i}"><span class="sn">${i + 1}</span><span class="prev num">${p ? esc(fmtSet(ex, p, true)) : '—'}</span>${inputs}<button class="tick" data-act="tick" aria-label="Set ${i + 1} done" aria-pressed="${s.done ? 'true' : 'false'}">${I.check}</button></div>`;
+  return `<div class="set-row ${step ? 'cw' : 'c' + f.length}${s.done ? ' done' : ''}" data-k="${it.k}" data-p="${pid}" data-i="${i}"><span class="sn">${i + 1}</span><span class="prev num">${p ? esc(fmtSet(ex, p, true)) : '—'}</span>${inputs}<button class="tick" data-act="tick" aria-label="Set ${i + 1} done" aria-pressed="${s.done ? 'true' : 'false'}">${I.check}</button></div>`;
 }
-function hintFor(it, ex, prev) {
+function hintFor(it, ex, prev, pid) {
   if (!prev) {
-    const st = startOf(D.active ? D.active.person : D.me, it.ex);
+    const st = startOf(pid, it.ex);
     if (st != null && hasStep(ex.type)) return `<div class="hint first"><p>Starting ${ex.type === 'a' ? 'assistance' : 'weight'}: ${fmtN(st)} kg. Adjust with − and + if it feels too easy or too hard.</p></div>`;
     if (ex.type === 'w') return `<div class="hint first"><p>First time: pick a weight you can lift ${rng(it.lo, it.hi)} times with 1–3 reps to spare.</p></div>`;
     if (ex.type === 'a') return `<div class="hint first"><p>First time: pick enough assistance to do ${rng(it.lo, it.hi)} clean reps. Less assistance is harder.</p></div>`;
@@ -487,13 +518,13 @@ function hintFor(it, ex, prev) {
     const top = Math.max(...ps.map(s => s.w || 0));
     if (!top) return '';
     const sug = Math.round((top + (ex.inc || 2.5)) * 100) / 100;
-    return `<div class="hint"><p>You hit ${it.hi} on every set last time. Time to go heavier.</p><button class="btn small primary" data-act="apply" data-k="${it.k}" data-v="${sug}">Use ${fmtN(sug)} kg</button></div>`;
+    return `<div class="hint"><p>You hit ${it.hi} on every set last time. Time to go heavier.</p><button class="btn small primary" data-act="apply" data-k="${it.k}" data-p="${pid}" data-v="${sug}">Use ${fmtN(sug)} kg</button></div>`;
   }
   if (ex.type === 'a') {
     const low = Math.min(...ps.map(s => (s.w == null ? 0 : s.w)));
     if (!low) return `<div class="hint"><p>You did every set with no assistance. Nice.</p></div>`;
     const sug = Math.max(0, Math.round((low - (ex.inc || 2.5)) * 100) / 100);
-    return `<div class="hint"><p>You hit ${it.hi} on every set last time. Take away some help.</p><button class="btn small primary" data-act="apply" data-k="${it.k}" data-v="${sug}">Use ${fmtN(sug)} kg</button></div>`;
+    return `<div class="hint"><p>You hit ${it.hi} on every set last time. Take away some help.</p><button class="btn small primary" data-act="apply" data-k="${it.k}" data-p="${pid}" data-v="${sug}">Use ${fmtN(sug)} kg</button></div>`;
   }
   if (ex.type === 't') return `<div class="hint"><p>You held ${it.hi} s on every set last time. Try holding a little longer.</p></div>`;
   return `<div class="hint"><p>You hit ${it.hi} on every set last time. Try a couple more reps.</p></div>`;
@@ -506,40 +537,41 @@ function redrawCard(k) {
 function onSetInput(inp) {
   const row = inp.closest('.set-row'); if (!row || !D.active) return;
   const it = itemOf(row.dataset.k); if (!it) return;
-  const s = it.sets[Number(row.dataset.i)]; if (!s) return;
+  const pid = row.dataset.p, s = setsOf(it, pid)[Number(row.dataset.i)]; if (!s) return;
   s[inp.dataset.f] = parseNum(inp.value);
   inp.classList.remove('flag');
-  if (inp.dataset.f === 'w' || inp.dataset.f === 'l') { s.auto = false; carryDown(it, Number(row.dataset.i), inp.dataset.f); }
+  if (inp.dataset.f === 'w' || inp.dataset.f === 'l') { s.auto = false; carryDown(it, pid, Number(row.dataset.i), inp.dataset.f); }
   save();
 }
 // A weight typed or stepped on one set flows into the sets after it, until a set you changed yourself.
-function carryDown(it, i, f) {
-  const v = it.sets[i][f];
+function carryDown(it, pid, i, f) {
+  const sets = setsOf(it, pid), v = sets[i][f];
   const card = document.getElementById('ex-' + it.k);
-  for (let j = i + 1; j < it.sets.length; j++) {
-    const t = it.sets[j];
+  for (let j = i + 1; j < sets.length; j++) {
+    const t = sets[j];
     if (t.done) continue;
     if (!(t.auto || t[f] == null)) break;
     t[f] = v; t.auto = true;
-    const el = card && card.querySelector(`.set-row[data-i="${j}"] [data-f="${f}"]`);
+    const el = card && card.querySelector(`.set-row[data-p="${pid}"][data-i="${j}"] [data-f="${f}"]`);
     if (el) { el.value = v == null ? '' : fmtN(v); el.classList.remove('flag'); }
   }
 }
 function stepWeight(btn) {
   const row = btn.closest('.set-row'), it = itemOf(row.dataset.k); if (!it) return;
-  const i = Number(row.dataset.i), s = it.sets[i], ex = exById(it.ex), inp = row.querySelector('[data-f="w"]');
-  const before = [...it.sets.slice(0, i)].reverse().find(x => x.w != null);
+  const pid = row.dataset.p, sets = setsOf(it, pid);
+  const i = Number(row.dataset.i), s = sets[i], ex = exById(it.ex), inp = row.querySelector('[data-f="w"]');
+  const before = [...sets.slice(0, i)].reverse().find(x => x.w != null);
   const base = s.w != null ? s.w : parseNum(inp.placeholder) != null ? parseNum(inp.placeholder) : before ? before.w : 0;
   s.w = Math.max(0, Math.round((base + Number(btn.dataset.d) * (ex.inc || 2.5)) * 100) / 100);
   s.auto = false;
   inp.value = fmtN(s.w); inp.classList.remove('flag');
-  carryDown(it, i, 'w');
+  carryDown(it, pid, i, 'w');
   save();
 }
 function tick(btn) {
   const row = btn.closest('.set-row');
   const it = itemOf(row.dataset.k); if (!it) return;
-  const s = it.sets[Number(row.dataset.i)];
+  const i = Number(row.dataset.i), s = setsOf(it, row.dataset.p)[i];
   if (s.done) { s.done = false; row.classList.remove('done'); btn.setAttribute('aria-pressed', 'false'); save(); return; }
   const ex = exById(it.ex);
   let missing = null;
@@ -557,10 +589,11 @@ function tick(btn) {
   row.classList.add('done'); btn.setAttribute('aria-pressed', 'true');
   save();
   unlockAudio();
-  // In a superset, rest only after the last exercise of the pair.
+  // In a superset, rest only after the last exercise of the pair. Training together, rest once everyone has done this set.
   const a = D.active;
   if (it.g) { const grp = a.items.filter(x => x.g === it.g); if (grp.length > 1 && grp[grp.length - 1].k !== it.k) return; }
-  const remaining = a.items.some(x => x.sets.some(y => !y.done));
+  if (crewOf(a).some(pid => { const o = setsOf(it, pid)[i]; return o && !o.done; })) return;
+  const remaining = a.items.some(x => allSets(x).some(y => !y.done));
   if (it.rest && remaining) startRest(it.rest);
 }
 
@@ -606,44 +639,51 @@ async function wake(on) {
 
 /* finish */
 function finishSheet() {
-  const a = D.active;
-  const total = a.items.reduce((n, it) => n + it.sets.length, 0), done = countDone(a);
-  const draft = toRecord(a);
-  const prs = done ? computePRs(draft) : [];
+  const a = D.active, crew = crewOf(a);
+  const total = a.items.reduce((n, it) => n + allSets(it).length, 0), done = countDone(a);
+  const prs = [];
+  if (done) crew.forEach(pid => computePRs(toRecord(a, pid)).forEach(x => prs.push(Object.assign({ pid }, x))));
   openSheet({ kind: 'html', html: `<div class="sheet-head"><h2>${a.editing ? 'Save changes?' : done ? 'Nice work' : 'Nothing logged yet'}</h2>${closeBtn()}</div>
     <div class="stack">
       <div class="tiles"><div class="tile"><span class="lab">Time</span><b class="num">${a.editing ? fmtDur((a.end || a.start) - a.start) : fmtDur(Date.now() - a.start)}</b></div><div class="tile"><span class="lab">Sets</span><b class="num">${done}</b></div><div class="tile"><span class="lab">New bests</span><b class="num">${prs.length}</b></div></div>
-      ${prs.length ? `<div class="list">${prs.map(p => `<div class="row"><span class="row-name">${esc(exById(p.ex).name)}</span><span class="row-side up">${esc(p.label)}</span></div>`).join('')}</div>` : ''}
+      ${prs.length ? `<div class="list">${prs.map(p => `<div class="row"><span class="row-name">${crew.length > 1 ? `<span class="dot ${pcls(p.pid)}" style="display:inline-block;margin-right:7px"></span>` : ''}${esc(exById(p.ex).name)}</span><span class="row-side up">${esc(p.label)}</span></div>`).join('')}</div>` : ''}
       ${done < total ? `<p class="note">${total - done} set${total - done > 1 ? 's' : ''} not ticked. Only ticked sets are saved.</p>` : ''}
       <button class="btn primary wide" data-act="wk-save" ${done ? '' : 'disabled'}>${a.editing ? 'Save changes' : 'Save workout'}</button>
       <button class="btn wide" data-act="close">Keep going</button>
     </div>` });
 }
-function toRecord(a) {
-  const base = a.editing ? clone(D.records[a.id]) : { id: a.id, kind: 'workout', person: a.person, routine: a.routine, name: a.name, start: a.start, end: Date.now() };
-  base.items = a.items.map(it => ({ ex: it.ex, n: it.n, lo: it.lo, hi: it.hi, sets: it.sets.filter(s => s.done).map(s => {
+function toRecord(a, pid) {
+  pid = pid || a.person;
+  const id = (a.ids && a.ids[pid]) || a.id;
+  const base = a.editing ? clone(D.records[a.id]) : { id, kind: 'workout', person: pid, routine: a.routine, name: a.name, start: a.start, end: Date.now() };
+  if (!a.editing && crewOf(a).length > 1) base.with = crewOf(a).filter(x => x !== pid);
+  base.items = a.items.map(it => ({ ex: it.ex, n: it.n, lo: it.lo, hi: it.hi, sets: setsOf(it, pid).filter(s => s.done).map(s => {
     const o = {}; fieldsFor(exById(it.ex).type).forEach(f => { if (s[f] != null) o[f] = s[f]; else if (f !== 'l') o[f] = 0; }); return o;
   }) })).filter(it => it.sets.length);
   return base;
 }
 function saveWorkout() {
   const a = D.active;
-  const rec = toRecord(a);
-  rec.prs = computePRs(rec);
-  put(rec);
-  // Later workouts may have had a best that this edit changes.
-  if (a.editing) workouts(rec.person).filter(w => w.start > rec.start).forEach(w => { const p = computePRs(w); if (JSON.stringify(p) !== JSON.stringify(w.prs || [])) { w.prs = p; put(w); } });
+  let nPr = 0;
+  crewOf(a).forEach(pid => {
+    const rec = toRecord(a, pid);
+    if (!rec.items.length && !a.editing) return;
+    rec.prs = computePRs(rec); nPr += rec.prs.length;
+    put(rec);
+    // Later workouts may have had a best that this edit changes.
+    if (a.editing) workouts(rec.person).filter(w => w.start > rec.start).forEach(w => { const p = computePRs(w); if (JSON.stringify(p) !== JSON.stringify(w.prs || [])) { w.prs = p; put(w); } });
+  });
   D.active = null; S.rest = null; save();
   closeSheet(); wake(false);
   S.view = null; S.tab = a.editing ? 'history' : 'today';
   render(); window.scrollTo(0, 0);
-  toast(a.editing ? 'Changes saved.' : rec.prs.length ? `Saved. ${rec.prs.length} new best${rec.prs.length > 1 ? 's' : ''}!` : 'Workout saved.');
+  toast(a.editing ? 'Changes saved.' : nPr ? `Saved. ${nPr} new best${nPr > 1 ? 's' : ''}!` : 'Workout saved.');
 }
 function editWorkout(id) {
   if (D.active && !D.active.editing) { toast('Finish or discard the workout in progress first.'); return; }
   const w = D.records[id];
-  D.active = { id: w.id, kind: 'workout', person: w.person, routine: w.routine, name: w.name, start: w.start, end: w.end, editing: true,
-    items: w.items.map(it => Object.assign({}, it, { k: uid(), g: null, rest: 0, sets: it.sets.map(s => Object.assign({ w: null, r: null, t: null, m: null, l: null }, s, { done: true, auto: false })) })) };
+  D.active = { id: w.id, ids: { [w.person]: w.id }, crew: [w.person], kind: 'workout', person: w.person, routine: w.routine, name: w.name, start: w.start, end: w.end, editing: true,
+    items: w.items.map(it => { const o = Object.assign({}, it, { k: uid(), g: null, rest: 0, by: { [w.person]: it.sets.map(s => Object.assign({ w: null, r: null, t: null, m: null, l: null }, s, { done: true, auto: false })) } }); delete o.sets; return o; }) };
   save(); closeSheet(); S.view = 'workout'; render(); window.scrollTo(0, 0);
 }
 
@@ -830,6 +870,8 @@ function workoutSheet(id) {
 function renderPlan() {
   const pid = viewPerson(), mine = pid === D.me, rs = routines(pid), nx = nextRoutine(pid);
   let h = `<div class="hero"><span class="lab">Plan</span><h1>${mine ? 'Your workouts' : `${esc(pname(pid))}'s workouts`}</h1></div>${personChips(pid)}`;
+  const follows = !mine && !rs.length && localPeople().some(p => p.id === pid);
+  if (follows) return h + `<p class="note">${esc(pname(pid))} trains with you on this phone, so ${esc(pname(pid))} follows your plan.</p>`;
   if (!mine) h += `<p class="note" style="margin-bottom:12px">Only ${esc(pname(pid))} can change this plan.</p>`;
   if (!rs.length) h += `<div class="empty"><p>No workouts in this plan.</p></div>`;
   rs.forEach(r => {
@@ -905,15 +947,14 @@ function picked(exId) {
   const { mode, ctx } = S.pick;
   const ex = exById(exId);
   if (mode === 'add-active') {
-    D.active.items.push(makeItem(D.active.person, Object.assign({ ex: exId }, defaultsFor(ex)), D.active.editing ? D.active.start : null));
-    if (D.active.editing) D.active.items[D.active.items.length - 1].sets.forEach(s => { s.done = false; });
+    D.active.items.push(makeItem(crewOf(D.active), Object.assign({ ex: exId }, defaultsFor(ex)), D.active.editing ? D.active.start : null));
     save(); closeSheet(); render();
     const last = D.active.items[D.active.items.length - 1];
     const el = document.getElementById('ex-' + last.k); if (el) el.scrollIntoView({ block: 'center' });
   } else if (mode === 'swap') {
     const it = itemOf(ctx); if (!it) return closeSheet();
-    const fresh = makeItem(D.active.person, Object.assign({ ex: exId, n: it.sets.length }, ex.type === exById(it.ex).type ? { lo: it.lo, hi: it.hi, rest: it.rest } : defaultsFor(ex)), D.active.editing ? D.active.start : null);
-    Object.assign(it, { ex: exId, lo: fresh.lo, hi: fresh.hi, rest: fresh.rest, sets: fresh.sets });
+    const fresh = makeItem(crewOf(D.active), Object.assign({ ex: exId, n: setsOf(it, D.active.person).length || it.n }, ex.type === exById(it.ex).type ? { lo: it.lo, hi: it.hi, rest: it.rest } : defaultsFor(ex)), D.active.editing ? D.active.start : null);
+    Object.assign(it, { ex: exId, lo: fresh.lo, hi: fresh.hi, rest: fresh.rest, by: fresh.by });
     save(); closeSheet(); render();
     toast(`Swapped for ${ex.name} in this workout. Change the plan in Plan.`);
   } else if (mode === 'add-routine') {
@@ -937,7 +978,12 @@ function renderMore() {
   let h = `<div class="hero"><span class="lab">More</span><h1>Settings</h1></div>`;
   h += `<div class="sec-head"><h2>You</h2></div><div class="card flat stack"><label class="field"><span class="lab">Your name</span><input type="text" id="my-name" value="${esc(p.name)}" maxlength="30"></label>
     ${people().length > 1 ? `<button class="link" data-act="switch-me">Not ${esc(p.name)}? Switch who's on this phone</button>` : ''}</div>`;
-  h += `<div class="sec-head"><h2>Train together</h2>${syncPill()}</div>`;
+  const here = localPeople().filter(o => o.id !== D.me);
+  h += `<div class="sec-head"><h2>People on this phone</h2></div><div class="card flat stack">
+    <p class="small muted">Log someone else's sets on your phone. You do the same workout, and each of you gets your own weights, history and progress.</p>
+    ${here.length ? `<div class="list">${here.map(o => `<div class="row"><span class="row-name"><span class="dot ${pcls(o.id)}" style="display:inline-block;margin-right:8px"></span>${esc(o.name)}</span><button class="btn small quiet danger" data-act="crew-remove" data-p="${o.id}">Remove</button></div>`).join('')}</div>` : ''}
+    <div class="btn-row"><input type="text" id="crew-name" placeholder="Their name" maxlength="30" style="flex:2"><button class="btn primary" data-act="crew-add" style="flex:1">Add</button></div></div>`;
+  h += `<div class="sec-head"><h2>On separate phones</h2>${syncPill()}</div>`;
   if (syncOn()) {
     const others = people().filter(o => o.id !== D.me);
     h += `<div class="card flat stack">
@@ -960,9 +1006,11 @@ function renderMore() {
       <input type="text" id="join-code" placeholder="reps:…" autocomplete="off" autocapitalize="off" spellcheck="false">
       <button class="btn" data-act="join">Join</button></div>`;
   }
-  const nStart = Object.keys((p.starts) || {}).length;
+  const forP = D.records[S.startFor] && localPeople().some(x => x.id === S.startFor) ? D.records[S.startFor] : p;
+  const nStart = Object.keys((forP.starts) || {}).length;
   h += `<div class="sec-head"><h2>Starting weights</h2>${nStart ? `<span class="pill">${nStart} set</span>` : ''}</div><div class="card flat stack">
-    <p class="small muted">Used for an exercise until you first log it. Paste a starting-weights code, or set them one by one in Plan › Edit.</p>
+    ${here.length ? `<div class="chips" role="group" aria-label="Whose">${localPeople().map(o => `<button class="chip ${pcls(o.id)}" data-act="start-for" data-p="${o.id}" aria-pressed="${o.id === forP.id}"><span class="dot"></span>${esc(o.id === D.me ? `${o.name} (you)` : o.name)}</button>`).join('')}</div>` : ''}
+    <p class="small muted">Used for an exercise until ${forP.id === D.me ? 'you first log' : `${esc(forP.name)} first logs`} it. Paste a starting-weights code${forP.id === D.me ? ', or set them one by one in Plan › Edit' : ''}.</p>
     <input type="text" id="start-code" placeholder="reps-start:…" autocomplete="off" autocapitalize="off" spellcheck="false">
     <button class="btn" data-act="start-apply">Add starting weights</button></div>`;
   h += `<div class="sec-head"><h2>Training</h2></div><div class="card flat">
@@ -1153,7 +1201,7 @@ const ACT = {
   'wk-discard': el => armed(el, () => { D.active = null; S.rest = null; save(); wake(false); S.view = null; render(); toast('Workout discarded.'); }),
   'wk-cancel-edit': () => { D.active = null; S.rest = null; save(); S.view = null; S.tab = 'history'; render(); },
   tick: el => tick(el),
-  apply: el => { const it = itemOf(el.dataset.k); if (!it) return; it.sets.forEach(s => { if (!s.done) { s.w = Number(el.dataset.v); s.auto = true; } }); save(); redrawCard(it.k); },
+  apply: el => { const it = itemOf(el.dataset.k); if (!it) return; setsOf(it, el.dataset.p).forEach(s => { if (!s.done) { s.w = Number(el.dataset.v); s.auto = true; } }); save(); redrawCard(it.k); },
   step: el => stepWeight(el),
   tips: el => { S.tips = S.tips || {}; S.tips[el.dataset.k] = !S.tips[el.dataset.k]; redrawCard(el.dataset.k); },
   'start-apply': () => {
@@ -1162,11 +1210,12 @@ const ACT = {
     try { const o = JSON.parse(atob(raw)); if (o && typeof o.w === 'object') w = o.w; } catch (e) { /* bad code */ }
     const good = w ? Object.entries(w).filter(([k, v]) => EX_BY[k] && typeof v === 'number' && v >= 0 && v < 1000) : [];
     if (!good.length) { toast("That code doesn't look right. Copy the whole thing, starting with reps-start:", 4000); return; }
-    const p = me(); p.starts = Object.assign({}, p.starts || {}, Object.fromEntries(good)); put(p);
-    render(); toast(`Added starting weights for ${good.length} exercises.`);
+    const p = D.records[S.startFor] && localPeople().some(x => x.id === S.startFor) ? D.records[S.startFor] : me();
+    p.starts = Object.assign({}, p.starts || {}, Object.fromEntries(good)); put(p);
+    render(); toast(`Added starting weights for ${good.length} exercises${p.id === D.me ? '' : ` for ${p.name}`}.`);
   },
-  'set-add': el => { const it = itemOf(el.dataset.k); const l = it.sets[it.sets.length - 1] || {}; it.sets.push({ w: l.w == null ? null : l.w, r: null, t: null, m: null, l: l.l == null ? null : l.l, done: false, auto: l.w != null }); save(); redrawCard(it.k); },
-  'set-remove': el => { const it = itemOf(el.dataset.k); if (it.sets.length > 1) it.sets.pop(); save(); redrawCard(it.k); },
+  'set-add': el => { const it = itemOf(el.dataset.k), ss = setsOf(it, el.dataset.p); const l = ss[ss.length - 1] || {}; ss.push({ w: l.w == null ? null : l.w, r: null, t: null, m: null, l: l.l == null ? null : l.l, done: false, auto: l.w != null }); save(); redrawCard(it.k); },
+  'set-remove': el => { const it = itemOf(el.dataset.k), ss = setsOf(it, el.dataset.p); if (ss.length > 1) ss.pop(); save(); redrawCard(it.k); },
   'ex-menu': el => {
     const k = el.dataset.k, it = itemOf(k), idx = D.active.items.indexOf(it), ex = exById(it.ex);
     openSheet({ kind: 'html', html: `<div class="sheet-head"><h2>${esc(ex.name)}</h2>${closeBtn()}</div><div class="menu">
@@ -1222,6 +1271,16 @@ const ACT = {
     put(r); routineSheet(r.id);
   },
   close: () => closeSheet(),
+  crew: el => { const off = new Set(D.settings.crewOff || []); off.has(el.dataset.p) ? off.delete(el.dataset.p) : off.add(el.dataset.p); D.settings.crewOff = [...off]; save(); render(); },
+  'crew-add': () => {
+    const v = (($('#crew-name') || {}).value || '').trim();
+    if (!v) { toast('Enter their name first.'); const i = $('#crew-name'); if (i) i.focus(); return; }
+    const p = createPerson(v, true);
+    D.settings.crewOff = (D.settings.crewOff || []).filter(x => x !== p.id); S.startFor = p.id; save();
+    render(); toast(`Added ${p.name}. You'll both be in your next workout.`, 3500);
+  },
+  'crew-remove': el => armed(el, () => { const p = D.records[el.dataset.p]; if (!p) return; p.home = null; put(p); if (S.startFor === p.id) S.startFor = null; render(); toast(`${p.name} won't be in new workouts. Their history stays.`, 3500); }),
+  'start-for': el => { S.startFor = el.dataset.p; render(); },
   'switch-me': () => { const ps = people(); openSheet({ kind: 'html', html: `<div class="sheet-head"><h2>Who's on this phone?</h2>${closeBtn()}</div><div class="menu">${ps.map(p => `<button data-act="pick-me-sheet" data-p="${p.id}"><span class="dot ${pcls(p.id)}"></span>${esc(p.name)}${p.id === D.me ? ' (now)' : ''}</button>`).join('')}</div>` }); },
   'pick-me-sheet': el => { if (D.active) { toast('Finish the workout in progress first.'); return; } D.me = el.dataset.p; S.viewP = null; save(); closeSheet(); render(); },
   'copy-script': () => copyScript(),
